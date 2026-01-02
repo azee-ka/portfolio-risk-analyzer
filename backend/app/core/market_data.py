@@ -1,95 +1,116 @@
-"""Market data fetching with Yahoo Finance"""
+"""Enhanced market data fetching with Yahoo Finance and Stooq fallback"""
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional
 import json
 import asyncio
 from urllib.parse import quote_plus
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 class MarketDataError(Exception):
+    """Custom exception for market data errors"""
     pass
+
 
 class MarketData:
     def __init__(self, redis_client=None):
         self.redis = redis_client
-        self.cache_ttl = 300
+        self.cache_ttl = 300  # 5 minutes for price data
+        self.history_cache_ttl = 1800  # 30 minutes for historical data
 
     def _to_stooq_symbol(self, ticker: str) -> str:
-        """Convert a common ticker (AAPL, GOOGL, BRK.B) to a Stooq symbol.
-
-        Stooq uses lowercase and typically requires market suffixes.
-        For US equities, the common format is: aapl.us
-
-        NOTE:
-        - This fallback is intended for equities/ETFs. Index tickers like ^GSPC won't work here.
-        - Crypto tickers like BTC-USD also won't work with Stooq.
-        """
+        """Convert a common ticker to Stooq format"""
         t = ticker.strip().upper()
         if not t or t.startswith('^'):
             raise MarketDataError(f"Stooq fallback does not support index ticker: {ticker}")
         if '-USD' in t or t.endswith('-USD') or 'USD' == t:
             raise MarketDataError(f"Stooq fallback does not support crypto ticker: {ticker}")
 
-        # Stooq supports dotted tickers, keep dot
         # Most US equities: <ticker>.US
         return f"{t.lower()}.us"
 
     async def _stooq_daily_history(self, ticker: str) -> pd.DataFrame:
-        """Fetch daily OHLCV from Stooq as a fallback when Yahoo is blocked.
+        """Fetch daily OHLCV from Stooq as fallback"""
+        try:
+            symbol = self._to_stooq_symbol(ticker)
+            url = f"https://stooq.com/q/d/l/?s={quote_plus(symbol)}&i=d"
 
-        Returns a DataFrame indexed by Date, with a 'Close' column.
-        """
-        symbol = self._to_stooq_symbol(ticker)
-        # Example: https://stooq.com/q/d/l/?s=aapl.us&i=d
-        url = f"https://stooq.com/q/d/l/?s={quote_plus(symbol)}&i=d"
+            def _read_csv() -> pd.DataFrame:
+                try:
+                    df = pd.read_csv(url)
+                    if df is None or len(df) == 0:
+                        return pd.DataFrame()
+                    
+                    if 'Date' not in df.columns or 'Close' not in df.columns:
+                        return pd.DataFrame()
+                    
+                    df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
+                    df = df.dropna(subset=['Date'])
+                    df = df.set_index('Date').sort_index()
+                    return df
+                except Exception as e:
+                    logger.warning(f"Stooq CSV read failed for {ticker}: {e}")
+                    return pd.DataFrame()
 
-        def _read_csv() -> pd.DataFrame:
-            df = pd.read_csv(url)
-            if df is None or len(df) == 0:
-                return pd.DataFrame()
-            # Stooq columns: Date,Open,High,Low,Close,Volume
-            if 'Date' not in df.columns or 'Close' not in df.columns:
-                return pd.DataFrame()
-            df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            df = df.dropna(subset=['Date'])
-            df = df.set_index('Date').sort_index()
-            return df
-
-        return await asyncio.to_thread(_read_csv)
+            return await asyncio.to_thread(_read_csv)
+        except Exception as e:
+            logger.error(f"Stooq history fetch failed for {ticker}: {e}")
+            return pd.DataFrame()
 
     async def _stooq_close_series(self, tickers: List[str], days: int) -> pd.DataFrame:
-        """Build a close-price DataFrame (columns=tickers) from Stooq."""
+        """Build close-price DataFrame from Stooq"""
         frames = []
         for t in tickers:
             df = await self._stooq_daily_history(t)
             if df is None or len(df) == 0:
-                raise MarketDataError(f"Stooq returned no data for {t}")
+                logger.warning(f"No Stooq data for {t}")
+                continue
             close = df[['Close']].rename(columns={'Close': t})
             frames.append(close)
 
+        if not frames:
+            raise MarketDataError("No data available from Stooq fallback")
+
         prices = pd.concat(frames, axis=1)
         prices = prices.dropna(how='all').tail(days)
+        
         if prices is None or len(prices) == 0:
             raise MarketDataError("No price data returned from Stooq fallback")
+        
         return prices
 
-    async def get_historical_prices(self, tickers: List[str], days: int = 252) -> pd.DataFrame:
+    async def get_historical_prices(
+        self, 
+        tickers: List[str], 
+        days: int = 252
+    ) -> pd.DataFrame:
+        """Get historical prices with caching and fallback"""
         cache_key = f"prices:{','.join(sorted(tickers))}:{days}"
 
+        # Try cache first
         if self.redis:
             try:
                 cached = await self.redis.get(cache_key)
                 if cached:
                     data = json.loads(cached)
-                    return pd.DataFrame(data).set_index('Date')
-            except:
-                pass
+                    df = pd.DataFrame(data)
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    return df.set_index('Date')
+            except Exception as e:
+                logger.warning(f"Cache read failed: {e}")
 
         end_date = datetime.now()
         start_date = end_date - timedelta(days=int(days * 1.5))
 
         try:
+            # Try Yahoo Finance first
+            logger.info(f"Fetching {len(tickers)} tickers from Yahoo Finance")
             data = yf.download(
                 tickers,
                 start=start_date,
@@ -106,61 +127,62 @@ class MarketData:
                 prices = data['Close']
 
             if prices is None or len(prices) == 0:
-                # Yahoo can be blocked/rate-limited and return empty.
-                # Fall back to Stooq for equities/ETFs.
+                logger.warning("Yahoo Finance returned empty data, trying Stooq")
                 prices = await self._stooq_close_series(tickers, days)
 
             prices = prices.dropna().tail(days)
 
+            # Check data quality
             if len(prices) < days * 0.8:
-                # If Yahoo gave sparse data, try Stooq once before failing.
+                logger.warning(f"Insufficient data from Yahoo ({len(prices)} days), trying Stooq")
                 try:
                     prices = await self._stooq_close_series(tickers, days)
                     prices = prices.dropna().tail(days)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Stooq fallback also failed: {e}")
 
             if len(prices) < days * 0.8:
-                raise MarketDataError(f"Insufficient data: got {len(prices)} days")
+                raise MarketDataError(
+                    f"Insufficient data: got {len(prices)} days, needed {int(days * 0.8)}+"
+                )
 
+            # Cache the result
             if self.redis:
                 try:
                     cache_data = prices.reset_index()
                     cache_data['Date'] = cache_data['Date'].astype(str)
                     await self.redis.setex(
                         cache_key,
-                        self.cache_ttl,
+                        self.history_cache_ttl,
                         json.dumps(cache_data.to_dict(orient='list'))
                     )
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Cache write failed: {e}")
 
             return prices
+            
         except Exception as e:
+            logger.error(f"Failed to fetch historical prices: {e}")
             raise MarketDataError(f"Failed to fetch data: {str(e)}")
 
     async def get_current_prices(self, tickers: List[str]) -> Dict[str, float]:
-        """Get latest prices for tickers.
-
-        NOTE: Yahoo Finance's quoteSummary JSON endpoints used by `.info` can intermittently fail
-        (rate-limits, HTML responses, malformed JSON). To keep the API stable, we prefer a
-        download/history-based approach and only fall back to fast_info/info if needed.
-        """
+        """Get latest prices with multiple fallback strategies"""
         cache_key = f"current:{','.join(sorted(tickers))}"
 
+        # Try cache first
         if self.redis:
             try:
                 cached = await self.redis.get(cache_key)
                 if cached:
                     return json.loads(cached)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Cache read failed: {e}")
 
         try:
             prices: Dict[str, float] = {}
 
-            # 1) Preferred: download recent daily bars for all tickers at once.
-            # This path is usually more reliable than quoteSummary JSON.
+            # Strategy 1: Bulk download (most reliable)
+            logger.info(f"Fetching current prices for {len(tickers)} tickers")
             data = yf.download(
                 tickers=tickers,
                 period="5d",
@@ -171,15 +193,16 @@ class MarketData:
                 threads=True,
             )
 
-            def _last_close_from_download(df, t: str) -> float:
+            def _extract_price(df, ticker: str) -> float:
+                """Extract last close price from download result"""
                 if df is None or len(df) == 0:
                     return 0.0
                 try:
                     if isinstance(df.columns, pd.MultiIndex):
-                        if ('Close', t) in df.columns:
-                            series = df[('Close', t)]
-                        elif (t, 'Close') in df.columns:
-                            series = df[(t, 'Close')]
+                        if ('Close', ticker) in df.columns:
+                            series = df[('Close', ticker)]
+                        elif (ticker, 'Close') in df.columns:
+                            series = df[(ticker, 'Close')]
                         else:
                             series = df['Close'] if 'Close' in df.columns else None
                     else:
@@ -191,89 +214,123 @@ class MarketData:
                     series = series.dropna()
                     if len(series) == 0:
                         return 0.0
+                    
                     return float(series.iloc[-1])
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"Price extraction failed for {ticker}: {e}")
                     return 0.0
 
-            for t in tickers:
-                p = _last_close_from_download(data, t)
-                if p and p > 0:
-                    prices[t] = p
+            for ticker in tickers:
+                price = _extract_price(data, ticker)
+                if price and price > 0:
+                    prices[ticker] = price
 
-            # 2) Fallback: per-ticker fast_info/history for missing ones.
-            missing = [t for t in tickers if t not in prices]
-            for t in missing:
+            # Strategy 2: Per-ticker fallback for missing prices
+            missing = [t for t in tickers if t not in prices or prices[t] <= 0]
+            
+            for ticker in missing:
                 try:
-                    tk = yf.Ticker(t)
+                    tk = yf.Ticker(ticker)
+                    price = 0.0
 
-                    p = 0.0
+                    # Try fast_info first
                     try:
                         fi = getattr(tk, 'fast_info', None)
                         if fi:
-                            p = float(fi.get('last_price') or fi.get('lastPrice') or fi.get('regularMarketPrice') or 0)
+                            price = float(
+                                fi.get('last_price') or 
+                                fi.get('lastPrice') or 
+                                fi.get('regularMarketPrice') or 
+                                0
+                            )
                     except Exception:
-                        p = 0.0
+                        pass
 
-                    if not p or p <= 0:
+                    # Try history if fast_info failed
+                    if not price or price <= 0:
                         try:
                             hist = tk.history(period='5d', interval='1d', auto_adjust=True)
                             if hist is not None and len(hist) > 0 and 'Close' in hist.columns:
-                                p2 = float(hist['Close'].dropna().iloc[-1])
-                                if p2 > 0:
-                                    p = p2
+                                close_series = hist['Close'].dropna()
+                                if len(close_series) > 0:
+                                    price = float(close_series.iloc[-1])
                         except Exception:
                             pass
 
-                    # last resort: info (can still fail, so keep it guarded)
-                    if not p or p <= 0:
+                    # Last resort: info (can be unreliable)
+                    if not price or price <= 0:
                         try:
                             info = tk.info
-                            p = float(info.get('currentPrice') or info.get('regularMarketPrice') or 0)
+                            price = float(
+                                info.get('currentPrice') or 
+                                info.get('regularMarketPrice') or 
+                                0
+                            )
                         except Exception:
-                            p = 0.0
+                            pass
 
-                    prices[t] = float(p) if p and p > 0 else 0.0
-                except Exception:
-                    prices[t] = 0.0
+                    if price and price > 0:
+                        prices[ticker] = float(price)
+                    else:
+                        prices[ticker] = 0.0
+                        
+                except Exception as e:
+                    logger.warning(f"Per-ticker fallback failed for {ticker}: {e}")
+                    prices[ticker] = 0.0
 
-            bad = [t for t, p in prices.items() if not p or p <= 0]
-            if bad:
-                # Final fallback: Stooq last close for any remaining tickers (equities/ETFs).
+            # Strategy 3: Stooq fallback for remaining zeros
+            failed = [t for t, p in prices.items() if not p or p <= 0]
+            if failed:
+                logger.info(f"Trying Stooq for {len(failed)} failed tickers")
                 try:
-                    stooq_prices = await self._stooq_close_series(bad, days=10)
-                    for t in bad:
-                        if t in stooq_prices.columns:
-                            s = stooq_prices[t].dropna()
-                            if len(s) > 0:
-                                prices[t] = float(s.iloc[-1])
-                except Exception:
-                    pass
+                    stooq_prices = await self._stooq_close_series(failed, days=10)
+                    for ticker in failed:
+                        if ticker in stooq_prices.columns:
+                            series = stooq_prices[ticker].dropna()
+                            if len(series) > 0:
+                                prices[ticker] = float(series.iloc[-1])
+                except Exception as e:
+                    logger.warning(f"Stooq fallback failed: {e}")
 
-            bad = [t for t, p in prices.items() if not p or p <= 0]
-            if bad:
+            # Final validation
+            still_failed = [t for t, p in prices.items() if not p or p <= 0]
+            if still_failed:
                 raise MarketDataError(
-                    "Unable to fetch current prices for: " + ", ".join(bad) +
-                    ". Data providers may be rate-limiting. Try again, or use different tickers."
+                    f"Unable to fetch current prices for: {', '.join(still_failed)}. "
+                    "Data providers may be rate-limiting. Try again in a few minutes."
                 )
 
+            # Cache successful results
             if self.redis:
                 try:
-                    await self.redis.setex(cache_key, 60, json.dumps(prices))
-                except Exception:
-                    pass
+                    await self.redis.setex(cache_key, self.cache_ttl, json.dumps(prices))
+                except Exception as e:
+                    logger.warning(f"Cache write failed: {e}")
 
             return prices
+            
         except MarketDataError:
             raise
         except Exception as e:
+            logger.error(f"Failed to fetch current prices: {e}")
             raise MarketDataError(f"Failed to fetch prices: {str(e)}")
 
-    async def calculate_returns(self, tickers: List[str], days: int = 252) -> pd.DataFrame:
+    async def calculate_returns(
+        self, 
+        tickers: List[str], 
+        days: int = 252
+    ) -> pd.DataFrame:
+        """Calculate daily returns from historical prices"""
         prices = await self.get_historical_prices(tickers, days)
         returns = prices.pct_change().dropna()
         return returns
 
+
+# Global instance
 market_data = MarketData()
 
+
 def set_redis_client(redis_client):
+    """Set Redis client for caching"""
     market_data.redis = redis_client
+    logger.info("Redis client configured for market data")
