@@ -617,7 +617,7 @@ export default function App() {
               title="Portfolio Holdings"
               subtitle="Manage your positions and shares"
               icon={<PieChart size={20} />}
-              isExpanded={true}
+              isExpanded={expandedSection === 'holdings'}
               onToggle={() => toggleSection('holdings')}
             >
               <div className="space-y-4">
@@ -793,7 +793,7 @@ export default function App() {
                 title="Analysis Results"
                 subtitle="Comprehensive risk metrics and statistics"
                 icon={<Activity size={20} />}
-                isExpanded={true}
+                isExpanded={expandedSection === 'results'}
                 onToggle={() => toggleSection('results')}
               >
                 {loading ? (
@@ -995,17 +995,19 @@ export default function App() {
           <div className="space-y-5">
             <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.04] to-white/[0.01] p-5 backdrop-blur-sm">
               <div className="text-sm font-semibold mb-1">Lookback Window</div>
-              <div className="text-xs text-white/60 mb-3">Trading days for return calculation (30–1260)</div>
+              <div className="text-xs text-white/60 mb-4">Trading days for return calculation (30–1260)</div>
               <div className="flex items-center gap-4">
-                <input
-                  type="range"
-                  min={30}
-                  max={1260}
-                  step={1}
-                  value={settings.lookback_days}
-                  onChange={(e) => setSettings((s) => ({ ...s, lookback_days: Number(e.target.value) }))}
-                  className="flex-1 h-2 rounded-full bg-white/10 accent-cyan-500"
-                />
+                <div className="flex-1 py-2">
+                  <input
+                    type="range"
+                    min={30}
+                    max={1260}
+                    step={1}
+                    value={settings.lookback_days}
+                    onChange={(e) => setSettings((s) => ({ ...s, lookback_days: Number(e.target.value) }))}
+                    className="w-full"
+                  />
+                </div>
                 <div className="w-20 text-right text-sm font-mono text-white/90 bg-white/5 px-3 py-2 rounded-lg border border-white/10">
                   {settings.lookback_days}
                 </div>
@@ -1014,17 +1016,19 @@ export default function App() {
 
             <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.04] to-white/[0.01] p-5 backdrop-blur-sm">
               <div className="text-sm font-semibold mb-1">Risk-free Rate</div>
-              <div className="text-xs text-white/60 mb-3">For Sharpe ratio calculation (0%–20%)</div>
+              <div className="text-xs text-white/60 mb-4">For Sharpe ratio calculation (0%–20%)</div>
               <div className="flex items-center gap-4">
-                <input
-                  type="range"
-                  min={0}
-                  max={0.2}
-                  step={0.0005}
-                  value={settings.risk_free_rate}
-                  onChange={(e) => setSettings((s) => ({ ...s, risk_free_rate: Number(e.target.value) }))}
-                  className="flex-1 h-2 rounded-full bg-white/10 accent-purple-500"
-                />
+                <div className="flex-1 py-2">
+                  <input
+                    type="range"
+                    min={0}
+                    max={0.2}
+                    step={0.0005}
+                    value={settings.risk_free_rate}
+                    onChange={(e) => setSettings((s) => ({ ...s, risk_free_rate: Number(e.target.value) }))}
+                    className="w-full"
+                  />
+                </div>
                 <div className="w-20 text-right text-sm font-mono text-white/90 bg-white/5 px-3 py-2 rounded-lg border border-white/10">
                   {(settings.risk_free_rate * 100).toFixed(2)}%
                 </div>
@@ -1033,17 +1037,19 @@ export default function App() {
 
             <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.04] to-white/[0.01] p-5 backdrop-blur-sm">
               <div className="text-sm font-semibold mb-1">Auto-refresh Interval</div>
-              <div className="text-xs text-white/60 mb-3">Automatic analysis frequency (1–60 minutes)</div>
+              <div className="text-xs text-white/60 mb-4">Automatic analysis frequency (1–60 minutes)</div>
               <div className="flex items-center gap-4">
-                <input
-                  type="range"
-                  min={60000}
-                  max={3600000}
-                  step={60000}
-                  value={refreshInterval}
-                  onChange={(e) => setRefreshInterval(Number(e.target.value))}
-                  className="flex-1 h-2 rounded-full bg-white/10 accent-emerald-500"
-                />
+                <div className="flex-1 py-2">
+                  <input
+                    type="range"
+                    min={60000}
+                    max={3600000}
+                    step={60000}
+                    value={refreshInterval}
+                    onChange={(e) => setRefreshInterval(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
                 <div className="w-20 text-right text-sm font-mono text-white/90 bg-white/5 px-3 py-2 rounded-lg border border-white/10">
                   {Math.floor(refreshInterval / 60000)}m
                 </div>
@@ -1235,24 +1241,38 @@ function Modal({ title, children, onClose }: { title: string; children: React.Re
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 animate-in fade-in duration-200">
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-md" onClick={onClose} />
-      <div className="absolute inset-0 flex items-center justify-center p-5">
-        <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 animate-in fade-in duration-300">
+      {/* Backdrop */}
+      <div 
+        className="absolute inset-0 bg-black/80 backdrop-blur-md transition-opacity duration-300" 
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      
+      {/* Content wrapper - pointer-events-none to allow backdrop clicks */}
+      <div className="absolute inset-0 flex items-center justify-center p-5 pointer-events-none">
+        {/* Modal content - pointer-events-auto to enable interactions */}
+        <div className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto pointer-events-auto animate-in slide-in-from-bottom duration-300">
           <div
             aria-hidden
-            className="absolute -inset-px rounded-2xl bg-gradient-to-r from-cyan-400/20 via-blue-500/20 to-purple-400/20 blur-2xl"
+            className="absolute -inset-px rounded-2xl bg-gradient-to-r from-cyan-400/20 via-blue-500/20 to-purple-400/20 blur-2xl animate-pulse"
+            style={{ animationDuration: '3s' }}
           />
-          <div className="relative rounded-2xl border border-white/20 bg-black/80 backdrop-blur-2xl p-6 shadow-2xl">
+          <div className="relative rounded-2xl border border-white/20 bg-black/90 backdrop-blur-2xl p-6 shadow-2xl transition-all duration-300">
             <div className="flex items-start justify-between gap-3 mb-6">
               <div>
-                <div className="text-lg font-semibold">{title}</div>
-                <div className="text-xs text-white/55 mt-1">Press Esc to close</div>
+                <div className="text-lg font-semibold bg-clip-text text-transparent bg-gradient-to-r from-cyan-300 to-blue-300">
+                  {title}
+                </div>
+                <div className="text-xs text-white/55 mt-1 flex items-center gap-2">
+                  <kbd className="px-2 py-0.5 text-[10px] rounded bg-white/10 border border-white/20">Esc</kbd>
+                  or click outside to close
+                </div>
               </div>
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 p-2.5 transition-all hover:scale-105"
+                className="rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 p-2.5 transition-all hover:scale-110 hover:rotate-90 duration-300"
                 aria-label="Close"
               >
                 <X size={20} className="text-white/80" />
