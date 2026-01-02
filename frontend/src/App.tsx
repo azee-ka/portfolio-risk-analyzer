@@ -133,7 +133,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'montecarlo' | 'correlation' | 'stress'>('overview');
   const [route, setRoute] = useState<'app' | 'docs'>(() => (window.location.hash === '#/docs' ? 'docs' : 'app'));
-  const [expandedSection, setExpandedSection] = useState<string | null>('holdings');
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['holdings', 'results']));
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [refreshInterval, setRefreshInterval] = useState(300000); // 5 minutes
 
@@ -222,8 +222,8 @@ export default function App() {
 
   // Auto-expand results when metrics are loaded
   useEffect(() => {
-    if (metrics && expandedSection !== 'results') {
-      setExpandedSection('results');
+    if (metrics) {
+      setExpandedSections(prev => new Set(prev).add('results'));
     }
   }, [metrics]);
 
@@ -444,7 +444,15 @@ export default function App() {
   }, [lastRunAt]);
 
   const toggleSection = (section: string) => {
-    setExpandedSection(expandedSection === section ? null : section);
+    setExpandedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(section)) {
+        next.delete(section);
+      } else {
+        next.add(section);
+      }
+      return next;
+    });
   };
 
   return (
@@ -617,9 +625,8 @@ export default function App() {
               title="Portfolio Holdings"
               subtitle="Manage your positions and shares"
               icon={<PieChart size={20} />}
-              isExpanded={expandedSection === 'holdings'}
+              isExpanded={expandedSections.has('holdings')}
               onToggle={() => toggleSection('holdings')}
-              defaultExpanded={true}
             >
               <div className="space-y-4">
                 {holdings.length === 0 ? (
@@ -794,8 +801,7 @@ export default function App() {
                 title="Analysis Results"
                 subtitle="Comprehensive risk metrics and statistics"
                 icon={<Activity size={20} />}
-                isExpanded={expandedSection === 'results'}
-                defaultExpanded={true}
+                isExpanded={expandedSections.has('results')}
                 onToggle={() => toggleSection('results')}
               >
                 {loading ? (
@@ -951,9 +957,8 @@ export default function App() {
                 title="Interpretation Guide"
                 subtitle="Understanding the metrics"
                 icon={<Info size={20} />}
-                isExpanded={expandedSection === 'guide'}
+                isExpanded={expandedSections.has('guide')}
                 onToggle={() => toggleSection('guide')}
-                defaultExpanded={false}
               >
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   <InfoTile
@@ -1119,52 +1124,46 @@ function GlassCard({ children, className = '' }: { children: React.ReactNode; cl
 }
 
 function CollapsibleSection({
-  title,
-  subtitle,
-  icon,
-  children,
-  isExpanded,
-  defaultExpanded,
-  onToggle,
-}: {
-  title: string;
-  subtitle: string;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-  isExpanded?: boolean;
-  onToggle: () => void;
-  defaultExpanded: boolean;
-}) {
-  const [isExpandedState, setIsExpandedState] = useState(defaultExpanded);
-  return (
-    <GlassCard className="mb-6">
-      <button
-        onClick={() => {
-          setIsExpandedState(!isExpandedState);
-          onToggle();
-        }}
-        className="w-full flex items-center justify-between gap-4 text-left group"
-        type="button"
-      >
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="p-3 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-400/30 group-hover:scale-110 transition-transform">
-            {icon}
+    title,
+    subtitle,
+    icon,
+    children,
+    isExpanded,
+    onToggle,
+  }: {
+    title: string;
+    subtitle: string;
+    icon: React.ReactNode;
+    children: React.ReactNode;
+    isExpanded: boolean;
+    onToggle: () => void;
+  }) {
+    return (
+      <GlassCard className="mb-6">
+        <button
+          onClick={onToggle}
+          className="w-full flex items-center justify-between gap-4 text-left group"
+          type="button"
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-3 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-400/30 group-hover:scale-110 transition-transform">
+              {icon}
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold truncate">{title}</h2>
+              <p className="text-sm text-white/60 truncate">{subtitle}</p>
+            </div>
           </div>
-          <div className="min-w-0">
-            <h2 className="text-lg font-semibold truncate">{title}</h2>
-            <p className="text-sm text-white/60 truncate">{subtitle}</p>
+          <div className="shrink-0 p-2 rounded-xl bg-white/5 border border-white/10 group-hover:bg-white/10 transition-colors">
+            {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
           </div>
-        </div>
-        <div className="shrink-0 p-2 rounded-xl bg-white/5 border border-white/10 group-hover:bg-white/10 transition-colors">
-          {isExpandedState ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-        </div>
-      </button>
-
-      {isExpandedState && <div className="mt-6 animate-in slide-in-from-top duration-300">{children}</div>}
-    </GlassCard>
-  );
-}
-
+        </button>
+  
+        {isExpanded && <div className="mt-6 animate-in slide-in-from-top duration-300">{children}</div>}
+      </GlassCard>
+    );
+  }
+  
 function EmptyState({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.03] to-white/[0.01] p-10 text-center backdrop-blur-sm">

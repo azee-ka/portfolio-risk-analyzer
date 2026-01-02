@@ -1,29 +1,28 @@
 # Portfolio Risk Analyzer Backend Dependencies
-# Python 3.13 compatible (using pre-built wheels)
 
 # Web Framework
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
+fastapi
+uvicorn[standard]
+python-multipart
 
 # Data Validation
-pydantic==2.5.0
-pydantic-settings==2.1.0
+pydantic
+pydantic-settings
 
 # Market Data
-yfinance==0.2.40
-pandas==2.2.3
-numpy==2.0.2
+yfinance
+pandas
+numpy
 
 # Optimization & Statistics  
-scipy==1.14.1
+scipy
 
 # Caching (Optional)
-redis[asyncio]==5.0.1
+redis[asyncio]
 
 # HTTP Client
-httpx==0.25.2
-aiofiles==23.2.1
+httpx
+aiofiles
 
 # Development
-python-dotenv==1.0.0
+python-dotenv
