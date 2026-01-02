@@ -52,38 +52,6 @@ Click the settings icon to adjust:
 **Backend:** FastAPI, Pandas, NumPy, SciPy, yfinance  
 **Deployment:** Vercel (frontend), Render (backend)
 
-## API Documentation
-
-**Base URL:** https://portfolio-risk-analyzer-j1ah.onrender.com
-
-**Interactive Docs:** https://portfolio-risk-analyzer-j1ah.onrender.com/docs
-
-### Key Endpoints
-
-```
-POST /api/analysis/risk-metrics
-POST /api/analysis/var
-POST /api/analysis/correlation
-POST /api/analysis/stress-test
-POST /api/optimization/efficient-frontier
-POST /api/optimization/optimize-sharpe
-```
-
-### Example Request
-
-```bash
-curl -X POST https://portfolio-risk-analyzer-j1ah.onrender.com/api/analysis/risk-metrics \
-  -H "Content-Type: application/json" \
-  -d '{
-    "holdings": [
-      {"ticker": "AAPL", "shares": 100},
-      {"ticker": "GOOGL", "shares": 50}
-    ],
-    "lookback_days": 252,
-    "risk_free_rate": 0.04
-  }'
-```
-
 ## Methodology
 
 ### Value at Risk (VaR)
