@@ -619,6 +619,7 @@ export default function App() {
               icon={<PieChart size={20} />}
               isExpanded={expandedSection === 'holdings'}
               onToggle={() => toggleSection('holdings')}
+              defaultExpanded={true}
             >
               <div className="space-y-4">
                 {holdings.length === 0 ? (
@@ -794,6 +795,7 @@ export default function App() {
                 subtitle="Comprehensive risk metrics and statistics"
                 icon={<Activity size={20} />}
                 isExpanded={expandedSection === 'results'}
+                defaultExpanded={true}
                 onToggle={() => toggleSection('results')}
               >
                 {loading ? (
@@ -951,6 +953,7 @@ export default function App() {
                 icon={<Info size={20} />}
                 isExpanded={expandedSection === 'guide'}
                 onToggle={() => toggleSection('guide')}
+                defaultExpanded={false}
               >
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                   <InfoTile
@@ -1121,19 +1124,25 @@ function CollapsibleSection({
   icon,
   children,
   isExpanded,
+  defaultExpanded,
   onToggle,
 }: {
   title: string;
   subtitle: string;
   icon: React.ReactNode;
   children: React.ReactNode;
-  isExpanded: boolean;
+  isExpanded?: boolean;
   onToggle: () => void;
+  defaultExpanded: boolean;
 }) {
+  const [isExpandedState, setIsExpandedState] = useState(defaultExpanded);
   return (
     <GlassCard className="mb-6">
       <button
-        onClick={onToggle}
+        onClick={() => {
+          setIsExpandedState(!isExpandedState);
+          onToggle();
+        }}
         className="w-full flex items-center justify-between gap-4 text-left group"
         type="button"
       >
@@ -1147,11 +1156,11 @@ function CollapsibleSection({
           </div>
         </div>
         <div className="shrink-0 p-2 rounded-xl bg-white/5 border border-white/10 group-hover:bg-white/10 transition-colors">
-          {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+          {isExpandedState ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
         </div>
       </button>
 
-      {isExpanded && <div className="mt-6 animate-in slide-in-from-top duration-300">{children}</div>}
+      {isExpandedState && <div className="mt-6 animate-in slide-in-from-top duration-300">{children}</div>}
     </GlassCard>
   );
 }
