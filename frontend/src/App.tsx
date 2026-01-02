@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   TrendingUp,
   Plus,
@@ -219,6 +219,13 @@ export default function App() {
 
     return () => clearInterval(timer);
   }, [autoRefresh, refreshInterval, holdings]);
+
+  // Auto-expand results when metrics are loaded
+  useEffect(() => {
+    if (metrics && expandedSection !== 'results') {
+      setExpandedSection('results');
+    }
+  }, [metrics]);
 
   const totalShares = useMemo(() => {
     return holdings.reduce((acc, h) => acc + (Number.isFinite(h.shares) ? h.shares : 0), 0);
@@ -788,7 +795,6 @@ export default function App() {
                 icon={<Activity size={20} />}
                 isExpanded={true}
                 onToggle={() => toggleSection('results')}
-                defaultExpanded
               >
                 {loading ? (
                   <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.03] to-white/[0.01] p-8 backdrop-blur-sm">
@@ -1108,9 +1114,8 @@ function CollapsibleSection({
   subtitle,
   icon,
   children,
-  isExpanded = false,
+  isExpanded,
   onToggle,
-  defaultExpanded = false,
 }: {
   title: string;
   subtitle: string;
@@ -1118,7 +1123,6 @@ function CollapsibleSection({
   children: React.ReactNode;
   isExpanded: boolean;
   onToggle: () => void;
-  defaultExpanded?: boolean;
 }) {
   return (
     <GlassCard className="mb-6">
