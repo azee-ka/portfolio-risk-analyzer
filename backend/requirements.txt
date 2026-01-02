@@ -1,5 +1,5 @@
 # Portfolio Risk Analyzer Backend Dependencies
-# Python 3.11+ (or 3.13 with pandas 2.2.3+)
+# Python 3.13 compatible (using pre-built wheels)
 
 # Web Framework
 fastapi==0.104.1
@@ -13,10 +13,10 @@ pydantic-settings==2.1.0
 # Market Data
 yfinance==0.2.40
 pandas==2.2.3
-numpy==1.26.4
+numpy==2.0.2
 
-# Optimization & Statistics
-scipy==1.11.4
+# Optimization & Statistics  
+scipy==1.14.1
 
 # Caching (Optional)
 redis[asyncio]==5.0.1
